@@ -8,16 +8,8 @@
 /* Yes, deliciously evil. */
 /*jslint evil: true, strict: false, plusplus: false, regexp: false */
 /*global require: false, XMLHttpRequest: false, ActiveXObject: false,
-define: false, process: false, window: false */  
-define([
-//>>excludeStart('excludeHbs', pragmas.excludeHbs)
-'Handlebars', './hbs/underscore', './hbs/i18nprecompile', './hbs/json2'
-//>>excludeEnd('excludeHbs')
-], function (
-//>>excludeStart('excludeHbs', pragmas.excludeHbs)
- Handlebars, _, precompile, JSON
-//>>excludeEnd('excludeHbs')
-) {
+define: false, process: false, window: false */
+define(function (require) {
 //>>excludeStart('excludeHbs', pragmas.excludeHbs)
   var fs, getXhr,
         progIds = ['Msxml2.XMLHTTP', 'Microsoft.XMLHTTP', 'Msxml2.XMLHTTP.4.0'],
@@ -131,10 +123,54 @@ define([
 
         load: function (name, parentRequire, load, config) {
           //>>excludeStart('excludeHbs', pragmas.excludeHbs)
-
+          
             var compiledName = name + customNameExtension,
                 disableI18n = (config.hbs && config.hbs.disableI18n),
                 partialDeps = [];
+
+            // Dependencies
+            var dependencyConfig = (config.hbs && config.hbs.deps) ? config.hbs.deps : undefined;
+
+            var Handlebars, _, precompile, JSON, handlebarsDep;
+            if (dependencyConfig && dependencyConfig.handlebars) {
+              Handlebars = require(dependencyConfig.handlebars);
+              handlebarsDep = dependencyConfig.handlebars;
+            } else {
+              Handlebars = require('Handlebars', function () {}, function (error) {
+                if (!dependencyConfig || !dependencyConfig.handlebars) {
+                  throw new Error('hbs: no handlebars dependency specified and default handlebars dependency not found');
+                }
+              });
+              handlebarsDep = 'Handlebars';
+            }
+
+            if (dependencyConfig && dependencyConfig.underscore) {
+              _ = require(dependencyConfig.underscore);
+            } else {
+              _ = require('./hbs/underscore', function () {}, function () {
+                throw new Error('hbs: no underscore dependency specified and default underscore dependency not found');
+              });
+            }
+
+            if (!disableI18n) {
+              if (dependencyConfig && dependencyConfig.i18n) {
+                precompile = require(dependencyConfig.i18n);
+              } else {
+                precompile = require('./hbs/i18nprecompile', function () {}, function () {});
+              }
+              if (!precompile) throw new Error('hbs: no i18n dependency specified and default i18n dependency not found');
+            }
+
+            if (window.JSON) {
+              JSON = window.JSON;
+            } else {
+              if (dependencyConfig && dependencyConfig.json2) {
+                JSON = require(dependencyConfig.JSON);
+              } else {
+                JSON = require('./hbs/json2', function () {}, function () {});
+              }
+              if (!JSON) throw new Error('hbs: no JSON dependency specified and default JSON dependency not found');
+           }
 
             function recursiveNodeSearch( statements, res ) {
               _(statements).forEach(function ( statement ) {
@@ -376,12 +412,18 @@ define([
                                       "t.vars = " + JSON.stringify(vars) + ";\n";
                   }
 
-                  var mapping = disableI18n? false : _.extend( langMap, config.localeMapping ),
-                      prec = precompile( text, mapping, { originalKeyFallback: (config.hbs || {}).originalKeyFallback });
+                  if (disableI18n) {
+                    var options = {};
+                    var environment = new Handlebars.Compiler().compile(Handlebars.parse(text), options);
+                    text = new Handlebars.JavaScriptCompiler().compile(environment, options);
+                  } else {
+                    var mapping = disableI18n? false : _.extend( langMap, config.localeMapping );
+                    text = precompile( text, mapping, { originalKeyFallback: (config.hbs || {}).originalKeyFallback });
+                  }
 
                   text = "/* START_TEMPLATE */\n" +
-                         "define(['hbs','Handlebars'"+depStr+helpDepStr+"], function( hbs, Handlebars ){ \n" +
-                           "var t = Handlebars.template(" + prec + ");\n" +
+                         "define(['hbs','" + handlebarsDep + "'" + depStr + helpDepStr + "], function( hbs, Handlebars ){ \n" +
+                           "var t = Handlebars.template(" + text + ");\n" +
                            "Handlebars.registerPartial('" + name.replace( /\//g , '_') + "', t);\n" +
                            debugProperties +
                            "return t;\n" +
